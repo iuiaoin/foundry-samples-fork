@@ -32,10 +32,20 @@ WORKSPACE = os.getenv("AGENTS_WORKSPACE") or "basicaccountjqqa@e2e-tests@AML"
 WORKSPACE_V2 = os.getenv("AGENTS_WORKSPACE_V2") or "e2e-tests-westus2-account@e2e-tests-westus2@AML"
 API_VERSION = os.getenv("AGENTS_API_VERSION") or "2025-05-15-preview"
 TOKEN = os.getenv("AZ_TOKEN")
+
+# Production Resource Configuration
+PRODUCTION_RESOURCE = os.getenv("PRODUCTION_RESOURCE")  # e.g., "nextgen-eastus"
+PRODUCTION_SUBSCRIPTION = os.getenv("PRODUCTION_SUBSCRIPTION")  # e.g., "b1615458-c1ea-49bc-8526-cafc948d3c25"
+PRODUCTION_TENANT = os.getenv("PRODUCTION_TENANT")  # e.g., "33e577a9-b1b8-4126-87c0-673f197bf624"
+PRODUCTION_TOKEN = os.getenv("PRODUCTION_TOKEN")  # Production token from PowerShell script
+
+# Token management for dual authentication
+PRODUCTION_TOKEN = None  # Will be set when production tenant authentication is needed
+
 # v1 API base URL
 BASE_V1 = f"https://{HOST}/agents/v1.0/subscriptions/{SUBSCRIPTION_ID}/resourceGroups/{RESOURCE_GROUP}/providers/Microsoft.MachineLearningServices/workspaces/{WORKSPACE}"
-# v2 API base URL (using localhost for development with separate workspace and resource group)
-BASE_V2 = f"https://{LOCAL_HOST}/agents/v2.0/subscriptions/{SUBSCRIPTION_ID}/resourceGroups/{RESOURCE_GROUP_V2}/providers/Microsoft.MachineLearningServices/workspaces/{WORKSPACE_V2}"
+# v2 API base URL - will be determined based on production vs local mode
+BASE_V2 = None  # Will be set dynamically based on production resource configuration
 
 def create_cosmos_client_from_connection_string(connection_string: str):
     """
@@ -69,6 +79,27 @@ def ensure_database_and_container(client, database_name: str, container_name: st
         )
     
     return database, container
+
+def get_production_v2_base_url(resource_name: str, subscription_id: str, project_name: str) -> str:
+    """
+    Build the production v2 API base URL for Azure AI services.
+    
+    Args:
+        resource_name: The Azure AI resource name (e.g., "nextgen-eastus")
+        subscription_id: The subscription ID for production
+        project_name: The project name (e.g., "nextgen-eastus")
+    
+    Returns:
+        The production v2 API base URL
+    """
+    # Production format: https://{resource}-resource.services.ai.azure.com/api/projects/{project}/agents/{agent}/versions
+    return f"https://{resource_name}-resource.services.ai.azure.com/api/projects/{project_name}"
+
+# Production token handling removed - now handled by PowerShell wrapper
+# which provides PRODUCTION_TOKEN environment variable
+
+# Production authentication is now handled by the PowerShell wrapper
+# which generates both AZ_TOKEN and PRODUCTION_TOKEN environment variables
 
 def get_token_from_az() -> Optional[str]:
     """
@@ -202,24 +233,75 @@ def get_azure_credential():
         print("🖥️  Host environment detected, using default credential chain")
         return DefaultAzureCredential()
 
-def set_api_token() -> bool:
+def set_api_token(force_refresh: bool = False) -> bool:
     """
     Ensure we have a valid bearer token for API calls.
     Returns True if a token is set, False otherwise.
+    
+    Args:
+        force_refresh: If True, ignore existing tokens and get a fresh one from az CLI
     """
     global TOKEN
-    # Check environment variable first
-    env_token = os.getenv("AZ_TOKEN")
-    if env_token:
-        TOKEN = env_token
-        return True
-    # Try az CLI
+    
+    # If force refresh is requested, skip environment variable and get fresh token
+    if not force_refresh:
+        # Check environment variable first
+        env_token = os.getenv("AZ_TOKEN")
+        if env_token:
+            TOKEN = env_token
+            return True
+    
+    # Try az CLI (either forced or as fallback)
     token = get_token_from_az()
     if token:
         TOKEN = token
-        print("Token refreshed from az CLI.")
+        print("🔄 Token refreshed from az CLI.")
         return True
     return False
+
+def do_api_request_with_token(method: str, url: str, token: str, **kwargs) -> requests.Response:
+    """
+    Wrapper around requests.request with specific token authentication.
+    """
+    headers = kwargs.pop("headers", {})
+    headers["Authorization"] = f"Bearer {token}"
+    headers["Accept"] = "application/json"
+    kwargs["headers"] = headers
+
+    # Set longer timeout for localhost/local development (servers may be slower)
+    if "localhost" in url or "host.docker.internal" in url:
+        kwargs["timeout"] = 120  # 2 minutes for local development
+        kwargs["verify"] = False
+        # Suppress the SSL warning for localhost/local development
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        host_type = "localhost" if "localhost" in url else "host.docker.internal (Docker)"
+        print(f"🏠 Making request to {host_type} with extended timeout and no SSL verification: {url}")
+    elif "timeout" not in kwargs:
+        kwargs["timeout"] = 30
+
+    try:
+        resp = requests.request(method, url, **kwargs)
+        resp.raise_for_status()
+        return resp
+    
+    except requests.exceptions.Timeout as e:
+        print(f"⏰ Request timed out: {e}")
+        print("💡 This usually means:")
+        print("   - The server is not running")
+        print("   - The server is overloaded")
+        print("   - The endpoint doesn't exist")
+        if "localhost" in url:
+            print("   - Check if your local v2 API server is running on port 5001")
+        raise
+    except requests.exceptions.ConnectionError as e:
+        print(f"🔌 Connection failed: {e}")
+        if "localhost" in url:
+            print("💡 Make sure your local v2 API server is running on https://localhost:5001")
+        raise
+    except requests.exceptions.RequestException as e:
+        print(f"❌ API request failed: {e}")
+        raise
 
 def do_api_request(method: str, url: str, **kwargs) -> requests.Response:
     """
@@ -248,7 +330,7 @@ def do_api_request(method: str, url: str, **kwargs) -> requests.Response:
         if resp.status_code == 401:
             print("Received 401 Unauthorized. Trying to refresh token...")
             time.sleep(5)
-            if set_api_token():
+            if set_api_token(force_refresh=True):  # Force refresh from az CLI on 401
                 headers["Authorization"] = f"Bearer {TOKEN}"
                 kwargs["headers"] = headers
                 resp = requests.request(method, url, **kwargs)
@@ -277,19 +359,22 @@ def do_api_request(method: str, url: str, **kwargs) -> requests.Response:
         raise
 
 def test_v2_api_connectivity() -> bool:
-    """Test if the v2 API server is reachable."""
+    """Test if the local v2 API server is reachable."""
+    # Build local development URL for testing
+    local_base = f"https://{LOCAL_HOST}/agents/v2.0/subscriptions/{SUBSCRIPTION_ID}/resourceGroups/{RESOURCE_GROUP_V2}/providers/Microsoft.MachineLearningServices/workspaces/{WORKSPACE_V2}"
+    
     try:
         # Try a simple GET request to the base URL
-        print(f"🔍 Testing connectivity to {BASE_V2}...")
-        response = requests.get(BASE_V2, verify=False, timeout=10)
+        print(f"🔍 Testing connectivity to {local_base}...")
+        response = requests.get(local_base, verify=False, timeout=10)
         print(f"✅ Server responded with status code: {response.status_code}")
         return True
     except requests.exceptions.Timeout:
-        print(f"⏰ Timeout connecting to {BASE_V2}")
+        print(f"⏰ Timeout connecting to {local_base}")
         print("💡 The server might not be running or is too slow to respond")
         return False
     except requests.exceptions.ConnectionError:
-        print(f"🔌 Cannot connect to {BASE_V2}")
+        print(f"🔌 Cannot connect to {local_base}")
         print("💡 Make sure the v2 API server is running on https://localhost:5001")
         return False
     except Exception as e:
@@ -557,20 +642,38 @@ def list_assistants_from_project(project_endpoint: str, subscription_id: Optiona
         else:
             raise
 
-def create_agent_version_via_api(agent_name: str, agent_version_data: Dict[str, Any]) -> Dict[str, Any]:
+def create_agent_version_via_api(agent_name: str, agent_version_data: Dict[str, Any], production_resource: Optional[str] = None, production_subscription: Optional[str] = None, production_token: Optional[str] = None) -> Dict[str, Any]:
     """
     Create a v2 agent version using the v2 API endpoint.
     
     Args:
         agent_name: The agent name (without version)
         agent_version_data: The agent version payload matching v2 API format
+        production_resource: Optional production resource name (e.g., "nextgen-eastus")
+        production_subscription: Optional production subscription ID
+        production_token: Optional production token for authentication
     
     Returns:
         API response data
     """
-    # Build the v2 API endpoint URL
+    # Build the v2 API endpoint URL based on mode (production vs local)
     agent_name = agent_name[:len(agent_name)-1] + "f"
-    url = f"{BASE_V2}/agents/{agent_name}/versions"
+    
+    if production_resource and production_subscription:
+        # Production mode: use Azure AI services endpoint format
+        base_url = get_production_v2_base_url(production_resource, production_subscription, production_resource)
+        url = f"{base_url}/agents/{agent_name}/versions"
+        print(f"🏭 Using PRODUCTION endpoint")
+    else:
+        # Local development mode: use the existing BASE_V2 format
+        if BASE_V2 is None:
+            # Fallback to local development URL if not set
+            local_base = f"https://{LOCAL_HOST}/agents/v2.0/subscriptions/{SUBSCRIPTION_ID}/resourceGroups/{RESOURCE_GROUP_V2}/providers/Microsoft.MachineLearningServices/workspaces/{WORKSPACE_V2}"
+            url = f"{local_base}/agents/{agent_name}/versions"
+        else:
+            url = f"{BASE_V2}/agents/{agent_name}/versions"
+        print(f"🏠 Using LOCAL development endpoint")
+    
     params = {"api-version": API_VERSION}
     
     print(f"🌐 Creating agent version via v2 API:")
@@ -580,8 +683,14 @@ def create_agent_version_via_api(agent_name: str, agent_version_data: Dict[str, 
     print(f"   Full params: {params}")
     
     try:
-        # Make the POST request to create the agent version
-        response = do_api_request("POST", url, params=params, json=agent_version_data)
+        # Make the POST request to create the agent version with appropriate token
+        # Use production token from environment if available and production resource is specified
+        if production_resource and PRODUCTION_TOKEN:
+            print(f"   🔑 Using production token for authentication")
+            response = do_api_request_with_token("POST", url, PRODUCTION_TOKEN, params=params, json=agent_version_data)
+        else:
+            print(f"   🔑 Using standard token for authentication")
+            response = do_api_request("POST", url, params=params, json=agent_version_data)
         result = response.json()
         
         print(f"✅ Successfully created agent version via v2 API")
@@ -1041,7 +1150,7 @@ def save_v2_agent_to_cosmos(v2_agent_data: Dict[str, Any], connection_string: st
         print(f"   Migration Doc: {migration_doc}")
         raise
 
-def process_v1_assistants_to_v2_agents(args=None, assistant_id: Optional[str] = None, cosmos_connection_string: Optional[str] = None, use_api: bool = False, use_v2_api: bool = False, project_endpoint: Optional[str] = None, project_connection_string: Optional[str] = None, project_subscription: Optional[str] = None, project_resource_group: Optional[str] = None, project_name: Optional[str] = None):
+def process_v1_assistants_to_v2_agents(args=None, assistant_id: Optional[str] = None, cosmos_connection_string: Optional[str] = None, use_api: bool = False, use_v2_api: bool = False, project_endpoint: Optional[str] = None, project_connection_string: Optional[str] = None, project_subscription: Optional[str] = None, project_resource_group: Optional[str] = None, project_name: Optional[str] = None, production_resource: Optional[str] = None, production_subscription: Optional[str] = None, production_tenant: Optional[str] = None):
     """
     Main processing function that reads v1 assistants from Cosmos DB, API, Project endpoint, or Project connection string,
     converts them to v2 agents, and saves via Cosmos DB or v2 API.
@@ -1229,7 +1338,9 @@ def process_v1_assistants_to_v2_agents(args=None, assistant_id: Optional[str] = 
             sys.exit(1)
     else:
         # For v2 API saving, ensure we have API authentication
-        if not TOKEN and not set_api_token():
+        # Force refresh if we have production resource (might have switched tenants)
+        force_refresh = production_resource is not None
+        if not TOKEN and not set_api_token(force_refresh=force_refresh):
             print("❌ Error: Unable to obtain API authentication token for v2 API saving")
             print("Set AZ_TOKEN env var or ensure az CLI is installed and logged in")
             sys.exit(1)
@@ -1415,7 +1526,14 @@ def process_v1_assistants_to_v2_agents(args=None, assistant_id: Optional[str] = 
                 api_payload = prepare_v2_api_payload(v2_agent)
                 
                 # Create the agent version via v2 API
-                api_result = create_agent_version_via_api(agent_name, api_payload)
+                # Get production token if needed
+                # Production token is now provided via environment variable
+                if production_resource and not PRODUCTION_TOKEN:
+                    print(f"❌ Production resource specified but no PRODUCTION_TOKEN environment variable found. Skipping v2 API save.")
+                    print("💡 Use run-migration-docker-auth.ps1 for automatic dual-token authentication")
+                    continue
+                
+                api_result = create_agent_version_via_api(agent_name, api_payload, production_resource, production_subscription)
                 print(f"✅ Agent version created via v2 API: {api_result.get('id', 'N/A')}")
                 
             else:
@@ -1508,6 +1626,9 @@ Examples:
   
   # Full project connection workflow: read from project connection, save via v2 API
   python v1_to_v2_migration.py --project-connection-string "eastus.api.azureml.ms;subscription-id;resource-group;project-name" --use-v2-api
+  
+  # Production deployment: migrate to production Azure AI resource
+  python v1_to_v2_migration.py --project-endpoint "https://source-project.api.azure.com/api/projects/p-3" --use-v2-api --production-resource "nextgen-eastus" --production-subscription "b1615458-c1ea-49bc-8526-cafc948d3c25" --production-tenant "33e577a9-b1b8-4126-87c0-673f197bf624" asst_abc123
         """
     )
     
@@ -1597,14 +1718,53 @@ Examples:
         help='Add a test Azure Function tool to the assistant for testing Azure Function tool transformation.'
     )
     
+    # Production Resource Arguments
+    parser.add_argument(
+        '--production-resource',
+        type=str,
+        help='Production Azure AI resource name (e.g., "nextgen-eastus"). When provided, switches to production mode for v2 API endpoint.'
+    )
+    
+    parser.add_argument(
+        '--production-subscription', 
+        type=str,
+        help='Production subscription ID (required when using --production-resource). Example: "b1615458-c1ea-49bc-8526-cafc948d3c25"'
+    )
+    
+    parser.add_argument(
+        '--production-tenant',
+        type=str, 
+        help='Production tenant ID for Azure authentication. If provided, will authenticate with this tenant before migration. Example: "33e577a9-b1b8-4126-87c0-673f197bf624"'
+    )
+    
     args = parser.parse_args()
     
     # Handle empty string as None for assistant_id
     assistant_id = args.assistant_id if args.assistant_id and args.assistant_id.strip() else None
     cosmos_connection_string = args.cosmos_endpoint if args.cosmos_endpoint and args.cosmos_endpoint.strip() else None
     
+    # Validate production arguments
+    if args.production_resource:
+        if not args.production_subscription:
+            print("❌ Error: --production-subscription is required when using --production-resource")
+            sys.exit(1)
+        if not args.use_v2_api:
+            print("❌ Error: --use-v2-api is required when using production resource (--production-resource)")
+            sys.exit(1)
+    
     print("🚀 Starting v1 to v2 Agent Migration")
     print("=" * 50)
+    
+    # Check if production token is available when production mode is requested
+    if args.production_resource:
+        if PRODUCTION_TOKEN:
+            print(f"🏭 Production mode: using production token from environment")
+            print(f"   🎯 Production resource: {args.production_resource}")
+            print(f"   📋 Production subscription: {args.production_subscription}")
+        else:
+            print(f"🏭 Production mode: {args.production_resource}")
+            print("⚠️  No PRODUCTION_TOKEN environment variable found")
+            print("💡 Use run-migration-docker-auth.ps1 for automatic dual-token authentication")
     
     if assistant_id:
         print(f"🎯 Target Assistant ID: {assistant_id}")
@@ -1626,17 +1786,27 @@ Examples:
         print("💾 Reading assistants from Cosmos DB")
     
     if args.use_v2_api:
-        print("🚀 Saving agents via v2 API")
-        # Test v2 API connectivity before proceeding
-        if not test_v2_api_connectivity():
-            print("❌ Cannot connect to v2 API. Aborting migration.")
-            return
+        if args.production_resource:
+            print(f"🏭 Saving agents via PRODUCTION v2 API (resource: {args.production_resource})")
+            print(f"   � Production subscription: {args.production_subscription}")
+            # No connectivity test for production - it will be tested during actual API call
+        else:
+            print("�🚀 Saving agents via LOCAL v2 API")
+            # Test v2 API connectivity before proceeding for local development
+            if not test_v2_api_connectivity():
+                print("❌ Cannot connect to local v2 API. Aborting migration.")
+                return
     else:
         print("💾 Saving agents to Cosmos DB")
     
     print("=" * 50)
     
-    process_v1_assistants_to_v2_agents(args, assistant_id, cosmos_connection_string, args.use_api, args.use_v2_api, args.project_endpoint, args.project_connection_string, args.project_subscription, args.project_resource_group, args.project_name)
+    process_v1_assistants_to_v2_agents(
+        args, assistant_id, cosmos_connection_string, args.use_api, args.use_v2_api, 
+        args.project_endpoint, args.project_connection_string, args.project_subscription, 
+        args.project_resource_group, args.project_name, args.production_resource, 
+        args.production_subscription, args.production_tenant
+    )
 
 if __name__ == "__main__":
     main()

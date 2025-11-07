@@ -40,19 +40,84 @@ try {
     exit 1
 }
 
-# Generate fresh token
-Write-Host "${Blue}🔑 Generating fresh Azure AI token...${Reset}"
+# Parse arguments to detect production mode
+$productionTenant = $null
+$productionResource = $null
+$productionSubscription = $null
+
+for ($i = 0; $i -lt $Arguments.Length; $i++) {
+    if ($Arguments[$i] -eq "--production-tenant" -and ($i + 1) -lt $Arguments.Length) {
+        $productionTenant = $Arguments[$i + 1]
+    }
+    if ($Arguments[$i] -eq "--production-resource" -and ($i + 1) -lt $Arguments.Length) {
+        $productionResource = $Arguments[$i + 1]
+    }
+    if ($Arguments[$i] -eq "--production-subscription" -and ($i + 1) -lt $Arguments.Length) {
+        $productionSubscription = $Arguments[$i + 1]
+    }
+}
+
+# Generate source token (current tenant)
+Write-Host "${Blue}🔑 Generating source Azure AI token...${Reset}"
 try {
-    $token = az account get-access-token --scope https://ai.azure.com/.default --query accessToken -o tsv
-    if ($token -and $token.Length -gt 100) {
-        Write-Host "${Green}✅ Token generated successfully (length: $($token.Length))${Reset}"
+    $sourceToken = az account get-access-token --scope https://ai.azure.com/.default --query accessToken -o tsv
+    if ($sourceToken -and $sourceToken.Length -gt 100) {
+        Write-Host "${Green}✅ Source token generated successfully (length: $($sourceToken.Length))${Reset}"
     } else {
-        Write-Host "${Red}❌ Failed to generate token or token is invalid${Reset}"
+        Write-Host "${Red}❌ Failed to generate source token or token is invalid${Reset}"
         exit 1
     }
 } catch {
-    Write-Host "${Red}❌ Failed to generate Azure token: $_${Reset}"
+    Write-Host "${Red}❌ Failed to generate source Azure token: $_${Reset}"
     exit 1
+}
+
+# Handle production tenant authentication if specified
+$productionToken = $null
+if ($productionTenant) {
+    Write-Host "${Blue}🏭 Production mode detected - handling production tenant authentication${Reset}"
+    Write-Host "${Blue}🔐 Switching to production tenant: $productionTenant${Reset}"
+    
+    try {
+        # Check current tenant
+        $currentTenant = az account show --query tenantId -o tsv 2>$null
+        
+        if ($currentTenant -eq $productionTenant) {
+            Write-Host "${Green}✅ Already authenticated with production tenant${Reset}"
+        } else {
+            Write-Host "${Yellow}🔄 Switching from tenant $currentTenant to $productionTenant${Reset}"
+            az login --tenant $productionTenant --only-show-errors
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "${Red}❌ Failed to authenticate with production tenant${Reset}"
+                exit 1
+            }
+        }
+        
+        # Generate production token
+        Write-Host "${Blue}🔑 Generating production Azure AI token...${Reset}"
+        $productionToken = az account get-access-token --scope https://ai.azure.com/.default --query accessToken -o tsv
+        if ($productionToken -and $productionToken.Length -gt 100) {
+            Write-Host "${Green}✅ Production token generated successfully (length: $($productionToken.Length))${Reset}"
+        } else {
+            Write-Host "${Red}❌ Failed to generate production token${Reset}"
+            exit 1
+        }
+        
+        # Switch back to original tenant for source operations
+        if ($currentTenant -ne $productionTenant) {
+            Write-Host "${Blue}🔄 Switching back to source tenant for reading operations${Reset}"
+            az login --tenant $currentTenant --only-show-errors
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "${Yellow}⚠️  Warning: Could not switch back to original tenant${Reset}"
+            }
+        }
+        
+    } catch {
+        Write-Host "${Red}❌ Failed during production tenant authentication: $_${Reset}"
+        exit 1
+    }
+} else {
+    Write-Host "${Blue}🏠 Local development mode - using single tenant authentication${Reset}"
 }
 
 # Check if image exists
@@ -82,10 +147,23 @@ Write-Host "${Yellow}Arguments: $Arguments${Reset}"
 Write-Host ""
 
 try {
+    # Prepare Docker environment variables
+    $dockerEnvVars = @(
+        "--network", "host"
+        "-e", "DOCKER_CONTAINER=true"
+        "-e", "AZ_TOKEN=$sourceToken"
+    )
+    
+    # Add production token if available
+    if ($productionToken) {
+        $dockerEnvVars += "-e", "PRODUCTION_TOKEN=$productionToken"
+        Write-Host "${Green}🏭 Passing both source and production tokens to container${Reset}"
+    } else {
+        Write-Host "${Green}🏠 Passing source token to container${Reset}"
+    }
+    
     docker run --rm -it `
-        --network host `
-        -e DOCKER_CONTAINER=true `
-        -e AZ_TOKEN="$token" `
+        @dockerEnvVars `
         -e COSMOS_DB_CONNECTION_STRING="$env:COSMOS_DB_CONNECTION_STRING" `
         -e COSMOS_DB_DATABASE_NAME="$env:COSMOS_DB_DATABASE_NAME" `
         -e COSMOS_DB_CONTAINER_NAME="$env:COSMOS_DB_CONTAINER_NAME" `
