@@ -43,6 +43,9 @@ After authentication setup, use the platform-specific runner:
 
 # Verbose output
 .\run-migration-verbose.bat --help
+
+# Docker-based with automatic authentication (recommended)
+.\run-migration-docker-auth.ps1 --help
 ```
 
 **Linux/macOS (Bash):**
@@ -52,7 +55,20 @@ After authentication setup, use the platform-specific runner:
 
 ## 📋 Usage Examples
 
-### 1. Migrate from Cosmos DB to v2 API
+### 1. Production Migration with Dual-Tenant Authentication
+```powershell
+# Windows PowerShell - Full production migration
+.\run-migration-docker-auth.ps1 \
+  --project-endpoint "https://source-project.services.ai.azure.com/api/projects/p-3" \
+  --use-v2-api \
+  --source-tenant "72f988bf-86f1-41af-91ab-2d7cd011db47" \
+  --production-resource "nextgen-eastus" \
+  --production-subscription "b1615458-c1ea-49bc-8526-cafc948d3c25" \
+  --production-tenant "33e577a9-b1b8-4126-87c0-673f197bf624" \
+  --add-test-computer assistant_id
+```
+
+### 2. Migrate from Cosmos DB to v2 API
 ```bash
 # Using project endpoint
 ./run-migration.sh --project-endpoint "https://your-project.cognitiveservices.azure.com" --use-v2-api assistant-id
@@ -125,6 +141,12 @@ AZURE_PROJECT_NAME=your-project-name
 - `--add-test-tool image-gen` - Add image generation test
 - `--add-test-tool azure-function` - Add Azure Function test
 
+### Production Migration Options (Docker Auth Script Only)
+- `--source-tenant TENANT_ID` - Source tenant for reading assistants (e.g., Microsoft tenant)
+- `--production-tenant TENANT_ID` - Production tenant for writing agents
+- `--production-resource RESOURCE_NAME` - Production Azure AI resource name (e.g., "nextgen-eastus")
+- `--production-subscription SUBSCRIPTION_ID` - Production subscription ID
+
 ### Configuration Options
 - `--v1-api-version VERSION` - v1 API version (default: v1)
 - `--v2-api-version VERSION` - v2 API version (default: 2024-05-01-preview)
@@ -139,6 +161,15 @@ AZURE_PROJECT_NAME=your-project-name
 - **Volume Mounts**: Azure CLI config directory for authentication
 - **Network**: Host networking for localhost API access
 - **Environment**: Comprehensive environment variable support
+
+### Dual-Tenant Authentication
+The `run-migration-docker-auth.ps1` script provides advanced production migration capabilities:
+
+- **Source Tenant Authentication**: Reads assistants from source tenant (e.g., Microsoft tenant)
+- **Production Tenant Authentication**: Writes agents to production tenant
+- **Automatic Token Management**: Generates and manages separate tokens for each tenant
+- **Seamless Tenant Switching**: Handles Azure CLI tenant switching automatically
+- **Token Isolation**: Source and production tokens are isolated for security
 
 ### Security Considerations
 - Non-root container execution
@@ -248,13 +279,25 @@ endpoint=https://...;subscriptionid=...;resourcegroupname=...;projectname=...
    ```
    **Solution**: Run `az login` or use the setup script
 
-3. **Container Authentication Fails**
+3. **Dual-Tenant Authentication Issues**
+   ```
+   Token tenant does not match resource tenant
+   ```
+   **Solution**: Ensure correct source and production tenant IDs are specified
+
+4. **Agent Name Case Sensitivity**
+   ```
+   400 Bad Request on production endpoint
+   ```
+   **Solution**: Agent names are automatically converted to lowercase with proper formatting
+
+5. **Container Authentication Fails**
    ```
    Authentication test failed
    ```
    **Solution**: Ensure Azure CLI directory has proper permissions
 
-4. **Network Connection Issues**
+6. **Network Connection Issues**
    ```
    Connection refused to localhost
    ```
