@@ -890,6 +890,50 @@ def v1_assistant_to_v2_agent(v1_assistant: Dict[str, Any], agent_name: Optional[
     Transform a v1 assistant object to v2 agent structure.
     Based on the migration document mapping from v1 Agent to v2 AgentObject + AgentVersionObject.
     """
+    # Validate tools - check for unsupported tool types
+    v1_tools = v1_assistant.get("tools", [])
+    
+    # Handle string-encoded tools (from project client serialization)
+    if isinstance(v1_tools, str):
+        try:
+            v1_tools = json.loads(v1_tools)
+        except json.JSONDecodeError:
+            print(f"   ⚠️  Warning: Could not parse tools string: {v1_tools}")
+            v1_tools = []
+    
+    # Ensure v1_tools is a list
+    if not isinstance(v1_tools, list):
+        v1_tools = []
+    
+    # Check for unsupported tool types
+    assistant_id = v1_assistant.get("id", "unknown")
+    assistant_name = v1_assistant.get("name", "unknown")
+    
+    for tool in v1_tools:
+        if not isinstance(tool, dict):
+            continue
+            
+        tool_type = tool.get("type")
+        
+        if tool_type == "connected_agent":
+            raise ValueError(
+                f"❌ Migration failed for classic assistant '{assistant_name}' (ID: {assistant_id})\n"
+                f"   This classic assistant uses 'connected_agent' tool which is not supported in new agents.\n"
+                f"   Please use new agent workflows instead.\n"
+                f"   See documentation: https://learn.microsoft.com/azure/ai-services/agents/workflows"
+            )
+        elif tool_type == "event_binding":
+            raise ValueError(
+                f"❌ Migration failed for classic assistant '{assistant_name}' (ID: {assistant_id})\n"
+                f"   This classic assistant uses 'event_binding' tool which is not supported in new agents."
+            )
+        elif tool_type == "output_binding":
+            raise ValueError(
+                f"❌ Migration failed for classic assistant '{assistant_name}' (ID: {assistant_id})\n"
+                f"   This classic assistant uses 'output_binding' tool which is not supported in new agents.\n"
+                f"   Please update your agent to use 'capture_structured_outputs' instead."
+            )
+    
     # Derive agent name if not provided
     if not agent_name:
         agent_name = v1_assistant.get("name") or f"agent_{v1_assistant.get('id', 'unknown')}"
@@ -932,21 +976,10 @@ def v1_assistant_to_v2_agent(v1_assistant: Dict[str, Any], agent_name: Optional[
     }
 
      # Transform tools and merge with tool_resources
-    v1_tools = v1_assistant.get("tools", [])
+    # Note: v1_tools already validated and parsed above during connected_agent check
     v1_tool_resources = v1_assistant.get("tool_resources", {})
 
-    # Handle string-encoded tools and tool_resources (from project client serialization)
-    if isinstance(v1_tools, str):
-        try:
-            v1_tools = json.loads(v1_tools)
-        except json.JSONDecodeError:
-            # Try eval as fallback for string representations like "{'type': 'file_search'}"
-            try:
-                v1_tools = eval(v1_tools) if v1_tools.strip().startswith('[') or v1_tools.strip().startswith('{') else []
-            except:
-                print(f"   ⚠️  Could not parse tools string: {v1_tools}")
-                v1_tools = []
-    
+    # Handle string-encoded tool_resources (from project client serialization)
     if isinstance(v1_tool_resources, str):
         try:
             v1_tool_resources = json.loads(v1_tool_resources)
@@ -957,10 +990,6 @@ def v1_assistant_to_v2_agent(v1_assistant: Dict[str, Any], agent_name: Optional[
             except:
                 print(f"   ⚠️  Could not parse tool_resources string: {v1_tool_resources}")
                 v1_tool_resources = {}
-    
-    # Ensure v1_tools is a list
-    if not isinstance(v1_tools, list):
-        v1_tools = [v1_tools] if v1_tools else []
     
     # Ensure v1_tool_resources is a dict
     if not isinstance(v1_tool_resources, dict):
