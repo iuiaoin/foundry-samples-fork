@@ -55,12 +55,14 @@ After authentication setup, use the platform-specific runner:
 
 ## 📋 Usage Examples
 
-### 1. Production Migration with Dual-Tenant Authentication
+### 1. Production Migration with Dual-Tenant Authentication (REQUIRED)
+
+**All migrations require production parameters:**
+
 ```powershell
-# Windows PowerShell - Full production migration
+# Windows PowerShell - Migrate from v1 API to production v2 API
 .\run-migration-docker-auth.ps1 `
-  --project-endpoint "https://source-project.services.ai.azure.com/api/projects/p-3" `
-  --use-v2-api `
+  --use-api `
   --source-tenant "72f988bf-86f1-41af-91ab-2d7cd011db47" `
   --production-resource "nextgen-eastus" `
   --production-subscription "b1615458-c1ea-49bc-8526-cafc948d3c25" `
@@ -69,8 +71,7 @@ After authentication setup, use the platform-specific runner:
 
 # Linux/macOS - Same command structure
 ./run-migration-docker-auth.sh \
-  --project-endpoint "https://source-project.services.ai.azure.com/api/projects/p-3" \
-  --use-v2-api \
+  --use-api \
   --source-tenant "72f988bf-86f1-41af-91ab-2d7cd011db47" \
   --production-resource "nextgen-eastus" \
   --production-subscription "b1615458-c1ea-49bc-8526-cafc948d3c25" \
@@ -78,43 +79,67 @@ After authentication setup, use the platform-specific runner:
   asst_abc123def456
 ```
 
+**Required Parameters:**
+- `--production-resource`: Azure AI resource name (e.g., "nextgen-eastus")
+- `--production-subscription`: Subscription ID for production tenant
+- `--production-tenant`: Production tenant ID for writing agents
+- `--source-tenant`: Source tenant ID for reading assistants (optional, defaults to Microsoft tenant)
+
 ### 2. Migrate Using Project Connection String (Beta)
 ```bash
 # Connection string format: region.api.azureml.ms;subscription-id;resource-group;project-name
-./run-migration.sh \
+./run-migration-docker-auth.sh \
   --project-connection-string "eastus.api.azureml.ms;abc-123;my-rg;my-project" \
-  --use-v2-api \
+  --production-resource "nextgen-eastus" \
+  --production-subscription "b1615458-c1ea-49bc-8526-cafc948d3c25" \
+  --production-tenant "33e577a9-b1b8-4126-87c0-673f197bf624" \
   asst_abc123def456
 
 # Windows PowerShell
 .\run-migration-docker-auth.ps1 `
   --project-connection-string "eastus.api.azureml.ms;abc-123;my-rg;my-project" `
-  --use-v2-api `
+  --production-resource "nextgen-eastus" `
+  --production-subscription "b1615458-c1ea-49bc-8526-cafc948d3c25" `
+  --production-tenant "33e577a9-b1b8-4126-87c0-673f197bf624" `
   asst_abc123def456
 ```
-> **Note**: Connection string support requires `azure-ai-projects==1.0.0b10` (beta). The script automatically detects and installs the correct version.
+> **Note**: Connection string support requires `azure-ai-projects==1.0.0b10` (beta). The script automatically detects and installs the correct version. Production parameters are always required.
 
-### 3. Migrate from Project Endpoint to v2 API
+### 3. Migrate from Project Endpoint to Production v2 API
 ```bash
-# Using project endpoint
-./run-migration.sh --project-endpoint "https://your-project.cognitiveservices.azure.com" --use-v2-api assistant-id
+# Using project endpoint (production parameters required)
+./run-migration-docker-auth.sh \
+  --project-endpoint "https://your-project.cognitiveservices.azure.com" \
+  --production-resource "nextgen-eastus" \
+  --production-subscription "b1615458-c1ea-49bc-8526-cafc948d3c25" \
+  --production-tenant "33e577a9-b1b8-4126-87c0-673f197bf624" \
+  assistant-id
 ```
 
-### 2. Migrate from v1 API to Cosmos DB
+### 4. Add Test Tools to Migration
 ```bash
-./run-migration.sh --v1-api-base "https://api.openai.com/v1" --v1-api-key "your-key" --use-cosmos assistant-id
-```
-
-### 3. Add Test Tools to Migration
-```bash
-# Add function calling test
-./run-migration.sh --project-endpoint "https://your-project.cognitiveservices.azure.com" --use-v2-api --add-test-tool function assistant-id
+# Add function calling test (production parameters required)
+./run-migration-docker-auth.sh \
+  --use-api \
+  --add-test-function \
+  --production-resource "nextgen-eastus" \
+  --production-subscription "b1615458-c1ea-49bc-8526-cafc948d3c25" \
+  --production-tenant "33e577a9-b1b8-4126-87c0-673f197bf624" \
+  assistant-id
 
 # Add multiple test tools
-./run-migration.sh --project-endpoint "https://your-project.cognitiveservices.azure.com" --use-v2-api --add-test-tool function --add-test-tool mcp --add-test-tool computer-use assistant-id
+./run-migration-docker-auth.sh \
+  --use-api \
+  --add-test-function \
+  --add-test-mcp \
+  --add-test-computer \
+  --production-resource "nextgen-eastus" \
+  --production-subscription "b1615458-c1ea-49bc-8526-cafc948d3c25" \
+  --production-tenant "33e577a9-b1b8-4126-87c0-673f197bf624" \
+  assistant-id
 ```
 
-### 4. Environment Variables Support
+### 5. Environment Variables Support
 Create a `.env` file in the project directory:
 ```env
 # Azure Project Configuration
@@ -151,14 +176,13 @@ AZURE_PROJECT_NAME=your-project-name
 ## 🛠️ Command Line Options
 
 ### Input Methods (choose one)
-- `--cosmos` - Read from Cosmos DB
-- `--v1-api-base URL --v1-api-key KEY` - Read from v1 API
+- `--use-api` - Read from v1 API (recommended)
 - `--project-endpoint URL` - Use Azure AI Project endpoint
 - `--project-connection-string STRING` - Use Azure AI Project connection string
+- `--cosmos` - Read from Cosmos DB (legacy)
 
-### Output Methods (choose one)
-- `--use-cosmos` - Save to Cosmos DB
-- `--use-v2-api` - Save to v2 API
+### Output Methods
+- Always uses **production v2 API** (requires production parameters)
 
 ### Test Tool Options (optional, can use multiple)
 - `--add-test-tool function` - Add function calling test
@@ -167,11 +191,11 @@ AZURE_PROJECT_NAME=your-project-name
 - `--add-test-tool image-gen` - Add image generation test
 - `--add-test-tool azure-function` - Add Azure Function test
 
-### Production Migration Options (Docker Auth Script Only)
-- `--source-tenant TENANT_ID` - Source tenant for reading assistants (e.g., Microsoft tenant)
-- `--production-tenant TENANT_ID` - Production tenant for writing agents
-- `--production-resource RESOURCE_NAME` - Production Azure AI resource name (e.g., "nextgen-eastus")
-- `--production-subscription SUBSCRIPTION_ID` - Production subscription ID
+### Production Migration Options (REQUIRED for Docker Auth Scripts)
+- `--production-resource RESOURCE_NAME` - **REQUIRED** Production Azure AI resource name (e.g., "nextgen-eastus")
+- `--production-subscription SUBSCRIPTION_ID` - **REQUIRED** Production subscription ID
+- `--production-tenant TENANT_ID` - **REQUIRED** Production tenant for writing agents
+- `--source-tenant TENANT_ID` - *Optional* Source tenant for reading assistants (defaults to Microsoft tenant: 72f988bf-86f1-41af-91ab-2d7cd011db47)
 
 ### Configuration Options
 - `--v1-api-version VERSION` - v1 API version (default: v1)
@@ -237,10 +261,12 @@ The container automatically installs the correct `azure-ai-projects` package ver
 
 The script detects connection string usage and sets the `NEED_BETA_VERSION` flag automatically.
 
-### Dual-Tenant Authentication
-The `run-migration-docker-auth.ps1` and `run-migration-docker-auth.sh` scripts provide advanced production migration capabilities:
+### Dual-Tenant Authentication (REQUIRED)
+The `run-migration-docker-auth.ps1` and `run-migration-docker-auth.sh` scripts require production parameters for all migrations:
 
-- **Source Tenant Authentication**: Reads assistants from source tenant (e.g., Microsoft tenant)
+- **Production-First Architecture**: All migrations write to production v2 API (no localhost mode)
+- **Required Production Parameters**: Must specify production resource, subscription, and tenant
+- **Source Tenant Authentication**: Reads assistants from source tenant (defaults to Microsoft tenant)
 - **Production Tenant Authentication**: Writes agents to production tenant
 - **Automatic Token Management**: Generates and manages separate tokens for each tenant
 - **Seamless Tenant Switching**: Handles Azure CLI tenant switching automatically
