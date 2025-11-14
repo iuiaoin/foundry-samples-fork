@@ -26,7 +26,10 @@ from agent_framework.azure import AzureOpenAIChatClient
 from agent_framework_azure_ai import AzureAIAgentClient
 from azure.ai.agentserver.agentframework import from_agent_framework
 from azure.identity.aio import DefaultAzureCredential
+from dotenv import load_dotenv
 from pydantic import BaseModel
+
+load_dotenv(override=True)
 
 
 @dataclass
@@ -49,6 +52,10 @@ class Reviewer(Executor):
     def __init__(self, chat_client: BaseChatClient) -> None:
         super().__init__(id="reviewer")
         self._chat_client = chat_client
+        self._agent = chat_client.create_agent(
+            name="ToolClientAgent",
+            instructions="You are a helpful assistant with access to various tools.",
+        )
 
     @handler
     async def review(
@@ -98,9 +105,7 @@ class Reviewer(Executor):
 
         print("🔍 Reviewer: Sending review request to LLM...")
         # Get the response from the chat client.
-        response = await self._chat_client.get_response(
-            messages=messages, response_format=_Response
-        )
+        response = await self._agent.run(messages=messages, response_format=_Response)
 
         # Parse the response.
         parsed = _Response.model_validate_json(response.messages[-1].text)
@@ -154,7 +159,7 @@ class Worker(Executor):
         request = ReviewRequest(
             request_id=str(uuid4()),
             user_messages=user_messages,
-            agent_messages=response.messages,
+            agent_messages=[message for message in response.messages if message.role != ChatRole.TOOL],
         )
 
         print(
@@ -220,7 +225,7 @@ class Worker(Executor):
         messages.extend(request.user_messages)
 
         # Get the new response from the chat client.
-        response = await self._chat_client.get_response(messages=messages)
+        response = await self._agent.run(messages=messages)
         print(
             f"🔧 Worker: New response generated after feedback: {response.messages[-1].text}"
         )
