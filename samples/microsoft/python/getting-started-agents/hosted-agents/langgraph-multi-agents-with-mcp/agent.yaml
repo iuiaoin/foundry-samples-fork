@@ -4,7 +4,7 @@ metadata:
   example:
     - role: user
       content: |-
-        What's the latest news in AI? And return the word count of your answer.
+        Give me a short answer for how to create a resource group using azure cli? And return the word count of your answer.
   tags:
     - example
     - learning

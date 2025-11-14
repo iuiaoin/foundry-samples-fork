@@ -3,28 +3,25 @@ import logging
 import asyncio
 
 from dotenv import load_dotenv
+from typing import Literal, List
+
+from langchain.agents import create_agent
 from langchain.chat_models import init_chat_model
-from langchain_core.tools import tool
+from langchain_core.messages import BaseMessage, HumanMessage
+from langchain_core.tools import StructuredTool
 from langgraph.graph import (
     END,
     START,
     MessagesState,
     StateGraph,
 )
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command
+
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
+from azure.monitor.opentelemetry import configure_azure_monitor
 
 from azure.ai.agentserver.langgraph import from_langgraph
-from azure.monitor.opentelemetry import configure_azure_monitor
-from langchain.agents import create_agent
-from langgraph.graph.state import CompiledStateGraph
-from langchain_core.tools import StructuredTool
-
-
-from typing import Literal, List
-
-from langchain_core.messages import BaseMessage, HumanMessage
-from langgraph.graph import MessagesState, END
-from langgraph.types import Command
 
 
 logger = logging.getLogger(__name__)
@@ -112,7 +109,7 @@ def build_researcher_node(tools):
                 "You can only do research. You are working with a word count agent colleague."
             ),
         )
-        
+
         result = await research_agent.ainvoke(state)
         goto = get_next_node(result["messages"][-1], "word_counter")
         # wrap in a human message, as not all providers allow
