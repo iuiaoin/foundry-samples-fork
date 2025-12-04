@@ -27,7 +27,7 @@
   'southcentralus'
 ])
 @description('The Azure region where your AI Foundry resource and project will be created.')
-param location string = 'eastus'
+param location string = 'westus'
 
 @maxLength(9)
 @description('The name of the Azure AI Foundry resource.')
@@ -50,7 +50,7 @@ param modelName string = 'gpt-4o'
 param modelFormat string = 'OpenAI'
 
 @description('The version of your model')
-param modelVersion string = '2024-05-13'
+param modelVersion string = '2024-11-20'
 
 @description('The sku of your model deployment')
 param modelSkuName string = 'GlobalStandard'
@@ -60,7 +60,7 @@ param modelCapacity int = 1
 
 // Optionally bring existing resources
 @description('The AI Search Service full ARM Resource ID. This is an optional field, and if not provided, the resource will be created.')
-param aiSearchResourceId string = ''
+param aiSearchResourceId string = '/subscriptions/921496dc-987f-410f-bd57-426eb2611356/resourceGroups/rg-amanda/providers/Microsoft.Search/searchServices/rbassearch'
 
 @description('The AI Storage Account full ARM Resource ID. This is an optional field, and if not provided, the resource will be created.')
 param azureStorageAccountResourceId string = ''
