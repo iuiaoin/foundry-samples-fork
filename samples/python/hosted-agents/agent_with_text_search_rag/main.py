@@ -101,6 +101,7 @@ def create_agent():
         ),
         context_providers=TextSearchContextProvider(),
     )
+    return agent
 
 
 def main():
