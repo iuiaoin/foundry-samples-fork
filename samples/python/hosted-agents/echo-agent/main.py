@@ -2,10 +2,9 @@
 
 import asyncio
 from collections.abc import AsyncIterable
-from typing import Any, List
+from typing import Any
 
 from agent_framework import (
-    AIFunction,
     AgentRunResponse,
     AgentRunResponseUpdate,
     AgentThread,
@@ -148,28 +147,18 @@ class EchoAgent(BaseAgent):
             await self._notify_thread_of_new_messages(thread, normalized_messages, complete_response)
 
 
-def create_agent_factory():
-    """Create a factory function that builds an EchoAgent.
+def create_agent() -> EchoAgent:
+    """Factory function that creates an EchoAgent.
 
-    Returns a factory that takes tools and returns an EchoAgent instance.
-    The agent is created at runtime for every request, following the standard factory pattern.
+    :param tools: The list of AIFunction tools (unused by EchoAgent).
+    :type tools: List[AIFunction]
+    :return: An EchoAgent instance.
+    :rtype: EchoAgent
     """
-
-    async def agent_factory(tools: List[AIFunction]) -> EchoAgent:
-        """Factory function that creates an EchoAgent.
-
-        :param tools: The list of AIFunction tools (unused by EchoAgent).
-        :type tools: List[AIFunction]
-        :return: An EchoAgent instance.
-        :rtype: EchoAgent
-        """
-        agent = EchoAgent(
-            name="EchoBot", description="A simple agent that echoes messages with a prefix", echo_prefix="🔊 Echo: "
-        )
-        return agent
-
-    return agent_factory
+    agent = EchoAgent(
+        name="EchoBot", description="A simple agent that echoes messages with a prefix", echo_prefix="🔊 Echo: "
+    )
+    return agent
 
 if __name__ == "__main__":
-    agent_factory = create_agent_factory()
-    from_agent_framework(agent_factory).run()
+    from_agent_framework(lambda _: create_agent()).run()
