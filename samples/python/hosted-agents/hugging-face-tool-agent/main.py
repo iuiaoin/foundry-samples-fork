@@ -36,6 +36,15 @@ def create_agent_factory():
         :return: An Agent Framework ChatAgent instance.
         :rtype: ChatAgent
         """
+        # Get configuration from environment
+        project_endpoint = os.getenv("AZURE_AI_PROJECT_ENDPOINT")
+
+        if not project_endpoint:
+            raise ValueError(
+                "AZURE_AI_PROJECT_ENDPOINT environment variable is required. "
+                "Set it to your Azure AI project endpoint, e.g., "
+                "https://<your-account>.services.ai.azure.com/api/projects/<your-project>"
+        )
         # List all available tools from the ToolClient
         print("Fetching tools from Azure AI Tool Client via factory...")
         print(f"Found {len(tools)} tools:")
@@ -66,15 +75,6 @@ def create_agent_factory():
 async def quickstart():
     """Build and return an AgentFrameworkCBAgent using an agent factory function."""
 
-    # Get configuration from environment
-    project_endpoint = os.getenv("AZURE_AI_PROJECT_ENDPOINT")
-
-    if not project_endpoint:
-        raise ValueError(
-            "AZURE_AI_PROJECT_ENDPOINT environment variable is required. "
-            "Set it to your Azure AI project endpoint, e.g., "
-            "https://<your-account>.services.ai.azure.com/api/projects/<your-project>"
-        )
 
     # Create Azure credentials
     credential = DefaultAzureCredential()
@@ -90,10 +90,7 @@ async def quickstart():
     adapter = from_agent_framework(
         agent_factory,
         credentials=credential,
-        tools=[
-            {"type": "mcp", "project_connection_id": tool_connection_id}
-
-            ]
+        tools=[{"type": "mcp", "project_connection_id": tool_connection_id}]
     )
 
     print("Adapter created! Agent will be built on every request.")

@@ -1,6 +1,8 @@
 import asyncio
 import os
-from agent_framework import ChatAgent, HostedMCPTool
+from typing import List
+
+from agent_framework import AIFunction, ChatAgent, HostedMCPTool
 from agent_framework_azure_ai import AzureAIAgentClient
 from azure.ai.agentserver.agentframework import from_agent_framework
 from azure.identity.aio import DefaultAzureCredential
@@ -28,37 +30,47 @@ async def handle_approvals_with_thread(query: str, agent: "AgentProtocol", threa
     return result
 
 
-def get_agent() -> ChatAgent:
-    """Create and return a ChatAgent with Bing Grounding search tool."""
-    assert "AZURE_AI_PROJECT_ENDPOINT" in os.environ, (
-        "AZURE_AI_PROJECT_ENDPOINT environment variable must be set."
-    )
-    assert "AZURE_AI_MODEL_DEPLOYMENT_NAME" in os.environ, (
-        "AZURE_AI_MODEL_DEPLOYMENT_NAME environment variable must be set."
-    )
+def create_agent_factory():
+    """Create a factory function that builds a DocsAgent.
 
-    chat_client = AzureAIAgentClient(
-        endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
-        async_credential=DefaultAzureCredential(),
-    )
+    Returns a factory that takes tools and returns a ChatAgent instance.
+    The agent is created at runtime for every request, following the standard factory pattern.
+    """
 
-    # Create ChatAgent with the Bing search tool
-    agent = chat_client.create_agent(
-        name="DocsAgent",
-        instructions="You are a helpful assistant that can help with microsoft documentation questions.",
-        tools=HostedMCPTool(
-            name="Microsoft Learn MCP",
-            url="https://learn.microsoft.com/api/mcp",
-        ),
-    )
-    return agent
+    async def agent_factory(tools: List[AIFunction]) -> ChatAgent:
+        """Factory function that creates a DocsAgent.
 
-async def test_agent():
-    agent = get_agent()
-    thread = agent.get_new_thread()
-    response = await handle_approvals_with_thread("How do I create an Azure Function in Python?", agent, thread)
-    print("Agent response:", response.text)
+        :param tools: The list of AIFunction tools (unused by DocsAgent).
+        :type tools: List[AIFunction]
+        :return: A ChatAgent instance.
+        :rtype: ChatAgent
+        """
+
+        """Create and return a ChatAgent with Bing Grounding search tool."""
+        assert "AZURE_AI_PROJECT_ENDPOINT" in os.environ, (
+            "AZURE_AI_PROJECT_ENDPOINT environment variable must be set."
+        )
+        assert "AZURE_AI_MODEL_DEPLOYMENT_NAME" in os.environ, (
+            "AZURE_AI_MODEL_DEPLOYMENT_NAME environment variable must be set."
+        )
+
+        chat_client = AzureAIAgentClient(
+            endpoint=os.environ["AZURE_AI_PROJECT_ENDPOINT"],
+            async_credential=DefaultAzureCredential(),
+        )
+
+        agent = chat_client.create_agent(
+            name="DocsAgent",
+            instructions="You are a helpful assistant that can help with microsoft documentation questions.",
+            tools=HostedMCPTool(
+                name="Microsoft Learn MCP",
+                url="https://learn.microsoft.com/api/mcp",
+            ),
+        )
+        return agent
+
+    return agent_factory
 
 if __name__ == "__main__":
-    # asyncio.run(test_agent())
-    from_agent_framework(get_agent()).run()
+    agent_factory = create_agent_factory()
+    from_agent_framework(agent_factory).run()
