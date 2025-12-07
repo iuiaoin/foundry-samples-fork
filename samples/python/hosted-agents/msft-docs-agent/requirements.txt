@@ -2,8 +2,6 @@
 ./build/azure_ai_agentserver_agentframework-1.0.0b7-py3-none-any.whl
 
 agent-framework
-azure-ai-projects==1.1.0b4
-
 pytest==8.4.2
 python-dotenv==1.1.1
 azure-monitor-opentelemetry==1.8.1
