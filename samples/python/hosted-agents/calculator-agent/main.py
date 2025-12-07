@@ -89,8 +89,6 @@ def llm_with_tools():
 # Nodes
 def llm_call(state: MessagesState):
     """LLM decides whether to call a tool or not"""
-    raise ValueError("Simulated failure in llm_call node")
-
     return {
         "messages": [
             llm_with_tools().invoke(

@@ -6,7 +6,7 @@ from azure.ai.agentserver.agentframework import from_agent_framework
 from azure.identity import DefaultAzureCredential  # pyright: ignore[reportUnknownVariableType]
 
 
-def main():
+def create_agent():
     # Create agents
     researcher = AzureOpenAIChatClient(credential=DefaultAzureCredential()).create_agent(
         instructions=(
@@ -36,8 +36,11 @@ def main():
     # Convert the workflow to an agent
     workflow_agent = workflow.as_agent()
 
+    return workflow_agent
+
+def main():
     # Run the agent as a hosted agent
-    from_agent_framework(workflow_agent).run()
+    from_agent_framework(lambda _: create_agent()).run()
 
 
 if __name__ == "__main__":
