@@ -1,14 +1,14 @@
 **IMPORTANT!** All samples and other resources made available in this GitHub repository ("samples") are designed to assist in accelerating development of agents, solutions, and agent workflows for various scenarios. Review all provided resources and carefully test output behavior in the context of your use case. AI responses may be inaccurate and AI actions should be monitored with human oversight. Learn more in the transparency documents for [Agent Service](https://learn.microsoft.com/en-us/azure/ai-foundry/responsible-ai/agents/transparency-note) and [Agent Framework](https://github.com/microsoft/agent-framework/blob/main/TRANSPARENCY_FAQ.md).
- 
+
 Agents, solutions, or other output you create may be subject to legal and regulatory requirements, may require licenses, or may not be suitable for all industries, scenarios, or use cases. By using any sample, you are acknowledging that any output created using those samples are solely your responsibility, and that you will comply with all applicable laws, regulations, and relevant safety standards, terms of service, and codes of conduct.
- 
+
 Third-party samples contained in this folder are subject to their own designated terms, and they have not been tested or verified by Microsoft or its affiliates.
- 
+
 Microsoft has no responsibility to you or others with respect to any of these samples or any resulting output.
 
 # What this sample demonstrates
 
-This sample demonstrates how to use AI agents as executors within a workflow, hosted using 
+This sample demonstrates how to use AI agents as executors within a workflow, hosted using
 [Azure AI AgentServer SDK](https://learn.microsoft.com/en-us/dotnet/api/overview/azure/ai.agentserver.agentframework-readme) and
 deploy it to Microsoft Foundry using the Azure Developer CLI [ai agent](https://aka.ms/azdaiagent/docs) extension.
 
@@ -90,3 +90,21 @@ curl -sS -H "Content-Type: application/json" -X POST http://localhost:8088/respo
 ### Deploying the Agent to Microsoft Foundry
 
 To deploy your agent to Microsoft Foundry, follow the comprehensive deployment guide at https://aka.ms/azdaiagent/docs
+
+## Troubleshooting
+
+### Images built on Apple Silicon or other ARM64 machines do not work on our service
+
+We **recommend using `azd` cloud build**, which always builds images with the correct architecture.
+
+If you choose to **build locally**, and your machine is **not `linux/amd64`** (for example, an Apple Silicon Mac), the image will **not be compatible with our service**, causing runtime failures.
+
+**Fix for local builds**
+
+Add this line at the top of your `Dockerfile`:
+
+```dockerfile
+FROM --platform=linux/amd64 python:3.12-slim
+```
+
+This forces the image to be built for the required `amd64` architecture.
